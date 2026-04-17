@@ -3,6 +3,7 @@
 #include <SPI.h>
 #include <Ethernet.h>
 #include <LiquidCrystal_I2C.h>
+#include <Wire.h>
 
 
 // Рекомендуемые пины для ESP32 (избегаем конфликта с флеш-памятью)
@@ -24,10 +25,10 @@ const char* serverUrl = "http://192.168.4.1";
 // Интервал считывания данных криохранилища
 const unsigned long READ_INTERVAL = 5000;
 // интервал обновления дисплея
-const unsigned long LCD_UPDATE_INTERVAL = 3000;
+const unsigned long LCD_UPDATE_INTERVAL = 1000;
 // сетевые переподключения
-const unsigned long WIFI_RECONNECT_DELAY = 2000;
-const unsigned long LAN_RECONNECT_DELAY = 2000;
+const unsigned long WIFI_RECONNECT_DELAY = 1000;
+const unsigned long LAN_RECONNECT_DELAY = 1000;
 
 
 // =================СТАТУСЫ СЕТИ==================================
@@ -139,7 +140,6 @@ void startLAN() {
   Serial.print("✅ IP адрес: ");
   Serial.println(Ethernet.localIP());
 
-  lcd.clear();
   lcd.setCursor(0, 0);
   lcd.print(Ethernet.localIP());
 
@@ -160,35 +160,34 @@ void startLAN() {
 
 void startWifi() {
   // Start Wi-Fi
+  WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
   Serial.print("Connecting to WiFi");
 
   unsigned long startAttempt = millis();
-  const unsigned long timeout = 15000;  //  15 секунд на подключение
+  const unsigned long timeout = 10000;  //  1 секунд на подключение
 
   // Ждём подключения ИЛИ таймаута
   while (WiFi.status() != WL_CONNECTED && millis() - startAttempt < timeout) {
-    delay(500);
+    lcd.setCursor(0, 0);
+    lcd.print("Connecting WiFi ");
     Serial.print(".");
+    yield();
   }
 
   // Обработка результата
   if (WiFi.status() == WL_CONNECTED) {
     Serial.println(" ✅");
     Serial.println("WiFi connected");
-    lcd.clear();
     lcd.setCursor(0, 0);
-    lcd.print("WiFi connected");
-    delay(300);
+    lcd.print("WiFi connected  ");
     wifiConnected = true;  // 🔥 синхронизируем флаг!
     lastWifiReconnect = millis();
 
   } else {
     Serial.println(" ❌ Timeout");
-    lcd.clear();
     lcd.setCursor(0, 0);
-    lcd.print("WiFi timeout..");
-    delay(300);
+    lcd.print("WiFi timeout!  ");
     wifiConnected = false;
   }
 
@@ -201,47 +200,45 @@ void renewWifi() {
   // проверяем счетчик
   if (millis() - lastWifiReconnect < WIFI_RECONNECT_DELAY) return;
 
+
+  // Обновляем счетчик
+  lastWifiReconnect = millis();
+
   // проверяем статус соединения
   if (WiFi.status() == WL_CONNECTED) {
     if (!wifiConnected) {  // 🔥 только что подключились!
       Serial.println("[WIFI] ✅ Подключено. IP: " + WiFi.localIP().toString());
-      lcd.clear();
       lcd.setCursor(0, 0);
-      lcd.print("WiFi: OK");
+      lcd.print("WiFi connected! ");
       lcd.setCursor(0, 1);
       lcd.print(WiFi.localIP().toString().substring(0, 16));
-      delay(800);
     }
     wifiConnected = true;
-    lastWifiReconnect = millis();
     return;
   }
 
   // Если не подключен — пытаемся подключиться
   wifiConnected = false;
+
   Serial.println("[WIFI] Подключение к сети...");
-  lcd.clear();
   lcd.setCursor(0, 0);
-  lcd.print("WiFi Connect");
+  lcd.print("Connecting WiFi ");
   lcd.setCursor(0, 1);
   lcd.print("Please wait...");
-
-  WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
-  lastWifiReconnect = millis();
 }
 
 
 // Обновление статуса LAN, переподключение
 void renewLAN() {
 
-  // 🔹 1. Не проверяем слишком часто (защита от перегрузки)
+  // 🔹 Не проверяем слишком часто (защита от перегрузки)
   if (millis() - lastLanReconnect < LAN_RECONNECT_DELAY) return;
 
   // Обновление счетчика
   lastLanReconnect = millis();
 
-  // 🔹 2. Быстрая проверка: если всё ок — выходим, ставим флаг True
+  // 🔹 Быстрая проверка: если всё ок — выходим, ставим флаг True
   if (lanConnected && Ethernet.linkStatus() == LinkON && Ethernet.localIP() != IPAddress(0, 0, 0, 0)) {
     // Для DHCP: обновляем аренду адреса
     Ethernet.maintain();
@@ -249,56 +246,46 @@ void renewLAN() {
     return;  // ✅ Всё работает, ничего делать не нужно
   }
 
-  // 🔹 3. Если подключения нет — пробуем восстановить
+
+  // 🔹 Если подключения нет по результатам быстрой проверки (см. выше), выполняется дальнейший код
   Serial.println("🔌 LAN: проверка подключения...");
 
-  // // Защита от частых перезапусков (debounce)
-  // if (millis() - lastReconnectAttempt < RECONNECT_DELAY) return;
 
-  // 🔄 4. Сброс текущего соединения
+  // 🔄 Обновляем дисплей, выводим в COM порт
   Serial.println("🔄 LAN: перезапуск...");
   lcd.setCursor(0, 0);
   lcd.print("LAN reconnect...");
-  delay(100);  // Короткая пауза для стабилизации
 
-  // 🔄 5. Повторная инициализация
-  int result;
 
-  // Вариант А: DHCP (автоматический IP)
-  result = Ethernet.begin(mac);
+  //  Получаем заново IP адрес по DHCP
+  int result = Ethernet.begin(mac);
 
-  // // Вариант Б: Статический IP (раскомментируйте при необходимости)
+  // // Вариант Б: Статический IP (можно раскомментировать при необходимости)
   // result = Ethernet.begin(mac, staticIP, dns, gateway, subnet);
 
   // 🔹 6. Проверка результата
   if (result == 1) {
     // Успех! Ждём получения IP (для DHCP)
     unsigned long startWait = millis();
-    while (Ethernet.localIP() == IPAddress(0, 0, 0, 0) && millis() - startWait < 3000) {
-      delay(100);
-      Ethernet.maintain();  // Для получения DHCP
+    while (millis() - startWait < 3000) {
+      if (Ethernet.localIP() != IPAddress(0, 0, 0, 0) && Ethernet.linkStatus() == LinkON) {
+        lanConnected = true;
+        Serial.print("✅ LAN подключён: ");
+        Serial.println(Ethernet.localIP());
+        lcd.setCursor(0, 0);
+        lcd.print("LAN reconnected!");
+        return;
+      }
+      yield();  // передаем управление FreeRTOS
+      Ethernet.maintain();
     }
-
-    // Финальная проверка
-    if (Ethernet.localIP() != IPAddress(0, 0, 0, 0)) {
-      lanConnected = true;
-      Serial.print("✅ LAN подключён: ");
-      lcd.setCursor(0, 0);
-      lcd.print("LAN reconnected!");
-      delay(300);
-      Serial.println(Ethernet.localIP());
-      lastLanReconnect = millis();  // Сброс таймера
-      return;
-    }
-  } else {
-    lastLanReconnect = millis();
-    lanConnected = false;
-    return;
   }
 
   // 🔹 7. Если не удалось подключиться
   lanConnected = false;
   Serial.println("❌ LAN: ошибка подключения");
+  lcd.setCursor(0, 0);
+  lcd.print("LAN error       ");
 
 
   // Если непонятно что с чипом
@@ -313,7 +300,6 @@ void renewLAN() {
 // Обновление LCD дисплея для loop
 void updateLcdDisplay() {
   if (millis() - lastLcdUpdateTime < LCD_UPDATE_INTERVAL) return;
-  lcd.clear();
   lcd.setCursor(0, 0);
 
 
@@ -521,6 +507,9 @@ void setup() {
   lastReadTime = millis();
 
   // Инициализация дисплея
+  Wire.begin(21, 22);     // SDA, SCL (стандарт для ESP32)
+  Wire.setClock(400000);  // ускоряем шину ДО инициализации 400 кГц (Fast Mode). PCF8574 тянет стабильно
+
   lcd.init();
   lcd.backlight();
   lcd.clear();
@@ -530,7 +519,7 @@ void setup() {
   lcd.setCursor(0, 1);
   lcd.print(main_params);
 
-  delay(1000);
+  delay(500);
   lcd.clear();
 
 
@@ -541,7 +530,7 @@ void setup() {
   // Старт сервера
   server.begin();
   Serial.print("Server started on port 502 at ");
-   lcd.setCursor(0, 0);
+  lcd.setCursor(0, 0);
   lcd.print("Server started");
   Serial.println(Ethernet.localIP());
 
@@ -558,26 +547,29 @@ void handleClientRequests() {
   EthernetClient client = server.available();
   if (!client) return;
 
-  delay(10);
-
-  // безопасное чтение запроса
-  // String request = "";
-  // if (client.available()) {
-  //   request = client.readStringUntil('\r');
-  // }
-
-  // очищаем остаток буфера
-  while (client.available()) {
-    client.read();
+  // Ждём данные клиента (неблокирующе)
+  unsigned long start = millis();
+  while (!client.available() && millis() - start < 300) {
+    yield();
   }
+  while (client.available()) client.read();  // очищаем входной буфер
 
-  // отправляем http заголовки
+  // Безопасный снимок String (глубокое копирование)
+  // String response;
+  // noInterrupts();
+  // response = main_params;  // ~10-50 мкс, безопасно
+  // interrupts();
+
+  // HTTP-заголовки
   client.println("HTTP/1.1 200 OK");
   client.println("Content-Type: text/plain");
+  client.print("Content-Length: ");
+  client.println(main_params.length());
   client.println("Connection: close");
   client.println();
-  client.println(main_params);
 
+  // Отправка
+  client.print(main_params);
   client.stop();
 }
 
@@ -604,6 +596,4 @@ void loop() {
 
   // обработка запросов клиента
   handleClientRequests();
-
-  delay(10);
 }
