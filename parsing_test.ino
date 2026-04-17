@@ -141,6 +141,7 @@ void startLAN() {
   Serial.println(Ethernet.localIP());
 
   lcd.setCursor(0, 0);
+  lcd.clear();
   lcd.print(Ethernet.localIP());
 
   Serial.print("MAC: ");
@@ -276,7 +277,7 @@ void renewLAN() {
         lcd.print("LAN reconnected!");
         return;
       }
-      yield();  // передаем управление FreeRTOS
+      // yield();  // передаем управление FreeRTOS
       Ethernet.maintain();
     }
   }
@@ -305,8 +306,9 @@ void updateLcdDisplay() {
 
   // Отображение IP адреса
   if (!Ethernet.localIP()) {
-    lcd.print("NO LAN ADDR");
+    lcd.print("NO LAN ADDR     ");
   } else {
+    lcd.clear();
     lcd.print(Ethernet.localIP());
   }
 
@@ -532,6 +534,7 @@ void setup() {
   Serial.print("Server started on port 502 at ");
   lcd.setCursor(0, 0);
   lcd.print("Server started");
+  lcd.clear();
   Serial.println(Ethernet.localIP());
 
 
