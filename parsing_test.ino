@@ -270,7 +270,7 @@ void renewLAN() {
     // Успех! Ждём получения IP (для DHCP)
     unsigned long startWait = millis();
     while (millis() - startWait < 5000) {
-      yield();
+      yield();  // передаем управление FreeRTOS, если необходимо
 
       if (Ethernet.localIP() != IPAddress(0, 0, 0, 0) && Ethernet.linkStatus() == LinkON) {
         lanConnected = true;
@@ -280,7 +280,6 @@ void renewLAN() {
         lcd.print("LAN reconnected!");
         return;
       }
-      // yield();  // передаем управление FreeRTOS
       Ethernet.maintain();
       delay(50);
     }
@@ -290,8 +289,15 @@ void renewLAN() {
   lanConnected = false;
   Serial.println("❌ LAN: ошибка подключения");
   lcd.setCursor(0, 0);
-  lcd.print("LAN error       ");
+  lcd.print("LAN Error!      ");
 
+
+  // Проверка линка
+  if (Ethernet.linkStatus() == LinkOFF) {
+    lcd.setCursor(0, 0);
+    lcd.print("Check LAN cable!");
+    
+  }
 
   // Если непонятно что с чипом
   if (Ethernet.hardwareStatus() == EthernetNoHardware) {
@@ -512,15 +518,15 @@ void setup() {
   // Инициализация таймера
   lastReadTime = millis();
 
-  // Задаем конфигурацию watchdog 
+  // Задаем конфигурацию watchdog
   esp_task_wdt_config_t twdt_config = {
-    .timeout_ms = 10000,           // 10 second timeout
-    .idle_core_mask = 0,          // Monitor specific cores (0 for none)
-    .trigger_panic = true         // System resets on timeout
+    .timeout_ms = 10000,   // 10 second timeout
+    .idle_core_mask = 0,   // Monitor specific cores (0 for none)
+    .trigger_panic = true  // System resets on timeout
   };
 
-  esp_task_wdt_reconfigure(&twdt_config); // Apply config
-  esp_task_wdt_add(NULL);                 // Subscribe current task (loop)
+  esp_task_wdt_reconfigure(&twdt_config);  // Apply config
+  esp_task_wdt_add(NULL);                  // Subscribe current task (loop)
 
   // Инициализация дисплея
   Wire.begin(21, 22);     // SDA, SCL (стандарт для ESP32)
@@ -613,8 +619,7 @@ void loop() {
 
   // обработка запросов клиента
   handleClientRequests();
-  
-  // "Кормление" watchdoga
-  esp_task_wdt_reset(); 
 
+  // "Кормление" watchdoga
+  esp_task_wdt_reset();
 }
