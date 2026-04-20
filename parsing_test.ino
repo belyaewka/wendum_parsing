@@ -39,10 +39,6 @@ bool lanConnected = false;
 
 // ===================СЧЕТЧИКИ====================================
 
-// счетчик времени на millis для loop
-unsigned long now = millis();
-
-
 // переменные для фиксации времени считывания данных и обновления дисплея
 unsigned long lastReadTime = 0;
 unsigned long lastLcdUpdateTime = 0;
@@ -486,7 +482,7 @@ String extractBoldTags(String html) {
 void parseCryoWeb() {
 
   // Быстрая проверка таймера
-  if (now - lastReadTime < READ_INTERVAL) return;
+  if (millis() - lastReadTime < READ_INTERVAL) return;
 
   // Получаем страницу
   String web_page = getHtmlPage();
@@ -601,9 +597,6 @@ void handleClientRequests() {
 
 // ===================ОСНОВНОЙ ЦИКЛ ПРОГРАММЫ======================================================
 void loop() {
-
-  // сколько времени?
-  now = millis();
 
   // Поддерживаем LAN
   renewLAN();
