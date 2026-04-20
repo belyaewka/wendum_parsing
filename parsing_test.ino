@@ -4,6 +4,7 @@
 #include <Ethernet.h>
 #include <LiquidCrystal_I2C.h>
 #include <Wire.h>
+#include <esp_task_wdt.h>
 
 
 // Рекомендуемые пины для ESP32 (избегаем конфликта с флеш-памятью)
@@ -268,7 +269,9 @@ void renewLAN() {
   if (result == 1) {
     // Успех! Ждём получения IP (для DHCP)
     unsigned long startWait = millis();
-    while (millis() - startWait < 3000) {
+    while (millis() - startWait < 5000) {
+      yield();
+
       if (Ethernet.localIP() != IPAddress(0, 0, 0, 0) && Ethernet.linkStatus() == LinkON) {
         lanConnected = true;
         Serial.print("✅ LAN подключён: ");
@@ -279,6 +282,7 @@ void renewLAN() {
       }
       // yield();  // передаем управление FreeRTOS
       Ethernet.maintain();
+      delay(50);
     }
   }
 
@@ -508,6 +512,16 @@ void setup() {
   // Инициализация таймера
   lastReadTime = millis();
 
+  // Задаем конфигурацию watchdog 
+  esp_task_wdt_config_t twdt_config = {
+    .timeout_ms = 10000,           // 10 second timeout
+    .idle_core_mask = 0,          // Monitor specific cores (0 for none)
+    .trigger_panic = true         // System resets on timeout
+  };
+
+  esp_task_wdt_reconfigure(&twdt_config); // Apply config
+  esp_task_wdt_add(NULL);                 // Subscribe current task (loop)
+
   // Инициализация дисплея
   Wire.begin(21, 22);     // SDA, SCL (стандарт для ESP32)
   Wire.setClock(400000);  // ускоряем шину ДО инициализации 400 кГц (Fast Mode). PCF8574 тянет стабильно
@@ -599,4 +613,8 @@ void loop() {
 
   // обработка запросов клиента
   handleClientRequests();
+  
+  // "Кормление" watchdoga
+  esp_task_wdt_reset(); 
+
 }
