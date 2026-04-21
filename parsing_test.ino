@@ -254,9 +254,21 @@ void renewLAN() {
   lcd.setCursor(0, 0);
   lcd.print("LAN reconnect...");
 
-
+  pinMode(ETH_RST, OUTPUT);
+  digitalWrite(ETH_RST, LOW);
+  delay(50);
+  digitalWrite(ETH_RST, HIGH);
+  delay(100);
+  
   //  Получаем заново IP адрес по DHCP
   int result = Ethernet.begin(mac);
+
+  // Выводим результат для отладки
+  lcd.setCursor(0, 0);
+  lcd.print("Result:        ");
+  lcd.setCursor(15, 0);
+  lcd.print(result);
+
 
   // // Вариант Б: Статический IP (можно раскомментировать при необходимости)
   // result = Ethernet.begin(mac, staticIP, dns, gateway, subnet);
@@ -264,6 +276,8 @@ void renewLAN() {
   // 🔹 6. Проверка результата
   if (result == 1) {
     // Успех! Ждём получения IP (для DHCP)
+    lcd.setCursor(0, 0);
+    lcd.print("LAN begin OK    ");
     unsigned long startWait = millis();
     while (millis() - startWait < 5000) {
       yield();  // передаем управление FreeRTOS, если необходимо
@@ -277,8 +291,8 @@ void renewLAN() {
         return;
       }
       Ethernet.maintain();
-      delay(50);
     }
+    return;
   }
 
   // 🔹 7. Если не удалось подключиться
@@ -288,16 +302,18 @@ void renewLAN() {
   lcd.print("LAN Error!      ");
 
 
+
   // Проверка линка
   if (Ethernet.linkStatus() == LinkOFF) {
     lcd.setCursor(0, 0);
     lcd.print("Check LAN cable!");
-    
+    return;
   }
 
   // Если непонятно что с чипом
   if (Ethernet.hardwareStatus() == EthernetNoHardware) {
     startLAN();
+    return;
   }
 
   return;
@@ -516,13 +532,14 @@ void setup() {
 
   // Задаем конфигурацию watchdog
   esp_task_wdt_config_t twdt_config = {
-    .timeout_ms = 10000,   // 10 second timeout
+    .timeout_ms = 30000,   // 30 second timeout
     .idle_core_mask = 0,   // Monitor specific cores (0 for none)
     .trigger_panic = true  // System resets on timeout
   };
 
   esp_task_wdt_reconfigure(&twdt_config);  // Apply config
   esp_task_wdt_add(NULL);                  // Subscribe current task (loop)
+  esp_task_wdt_reset();
 
   // Инициализация дисплея
   Wire.begin(21, 22);     // SDA, SCL (стандарт для ESP32)
@@ -597,6 +614,9 @@ void handleClientRequests() {
 
 // ===================ОСНОВНОЙ ЦИКЛ ПРОГРАММЫ======================================================
 void loop() {
+
+  // Поддерживаем DHCP
+  Ethernet.maintain();
 
   // Поддерживаем LAN
   renewLAN();
