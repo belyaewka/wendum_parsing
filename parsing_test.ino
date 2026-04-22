@@ -8,14 +8,15 @@
 #include <Wire.h>
 #include <esp_task_wdt.h>
 #include <esp_system.h>
+#include "esp_mac.h"
 
 
 // Рекомендуемые пины для ESP32 (избегаем конфликта с флеш-памятью -  Важно: НЕ использовать GPIO5!)
-#define ETH_CS 17 
+#define ETH_CS 17
 #define ETH_RST 4
 
 //MAC address
-byte mac[] = { 0x5E, 0x59, 0x10, 0x98, 0x23, 0x56 };
+// byte mac[] = { 0x5E, 0x59, 0x10, 0x98, 0x23, 0x56 };
 
 // Wifi настройки
 const char* ssid = "levelmeter";
@@ -70,7 +71,7 @@ void onEthEvent(arduino_event_id_t event) {
   switch (event) {
     case ARDUINO_EVENT_ETH_START:
       Serial.println("🔌 ETH Started");
-      ETH.setHostname("esp32-wendum");
+      ETH.setHostname("wendun_esp");
       break;
     case ARDUINO_EVENT_ETH_CONNECTED:
       Serial.println("🔗 Cable connected");
@@ -166,7 +167,7 @@ void startLAN() {
 
   // Ожидание получения IP (DHCP)
   unsigned long startWait = millis();
-  while (millis() - startWait < 10000 && ETH.localIP() == IPAddress(0, 0, 0, 0)) {
+  while (millis() - startWait < 30000 && ETH.localIP() == IPAddress(0, 0, 0, 0)) {
     yield();
     delay(100);
   }
@@ -178,12 +179,11 @@ void startLAN() {
     lcd.clear();
     lcd.print(ETH.localIP());
 
-    Serial.print("MAC: ");
-    for (int i = 0; i < 6; i++) {
-      Serial.print(mac[i], HEX);
-      if (i < 5) Serial.print(":");
-    }
-    Serial.println();
+    // Отображение MAC адреса
+    Serial.print("MAC Address: ");
+    Serial.println(ETH.macAddress());
+    lcd.setCursor(0, 1);
+    lcd.print(ETH.macAddress());
 
     lanConnected = true;
     lastLanReconnect = millis();
@@ -207,10 +207,11 @@ void startWifi() {
 
   // Ждём подключения ИЛИ таймаута
   while (WiFi.status() != WL_CONNECTED && millis() - startAttempt < timeout) {
+    yield();
     lcd.setCursor(0, 0);
     lcd.print("Connecting WiFi ");
     Serial.print(".");
-    yield();
+    
   }
 
   // Обработка результата
@@ -282,19 +283,20 @@ void renewLAN() {
   Serial.println("🔌 LAN: проверка подключения...");
   lanConnected = false;
 
-  // ✅ Проверка через ETH.connected() вместо linkStatus()
-  if (!ETH.connected()) {
-    lcd.setCursor(0, 0);
-    lcd.print("Check LAN cable!");
-    return;
-  }
-
   Serial.println("🔄 LAN: перезапуск...");
   lcd.setCursor(0, 0);
   lcd.print("LAN reconnect...");
 
   // ✅ ETH.end() вместо ETH.stop()
   ETH.end();
+  delay(100);
+
+
+  // Делаем reset W5500
+  pinMode(ETH_RST, OUTPUT);
+  digitalWrite(ETH_RST, LOW);
+  delay(50);
+  digitalWrite(ETH_RST, HIGH);
   delay(100);
 
   bool result = ETH.begin(ETH_PHY_W5500, 1, ETH_CS, -1, ETH_RST, ethSPI, 20);
@@ -304,7 +306,7 @@ void renewLAN() {
     lcd.print("ETH restart OK  ");
 
     unsigned long startWait = millis();
-    while (millis() - startWait < 10000) {
+    while (millis() - startWait < 30000) {
       yield();
       // ✅ Проверка через флаг + IP
       if (eth_connected && ETH.localIP() != IPAddress(0, 0, 0, 0)) {
@@ -540,7 +542,7 @@ void setup() {
 
   // Задаем конфигурацию watchdog
   esp_task_wdt_config_t twdt_config = {
-    .timeout_ms = 40000,   // 40 second timeout
+    .timeout_ms = 60000,   // 60 second timeout
     .idle_core_mask = 0,   // Monitor specific cores (0 for none)
     .trigger_panic = true  // System resets on timeout
   };
