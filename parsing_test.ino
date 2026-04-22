@@ -10,14 +10,12 @@
 #include <esp_system.h>
 
 
-// Рекомендуемые пины для ESP32 (избегаем конфликта с флеш-памятью)
-#define ETH_CS 17  // Важно: НЕ использовать GPIO5!
+// Рекомендуемые пины для ESP32 (избегаем конфликта с флеш-памятью -  Важно: НЕ использовать GPIO5!)
+#define ETH_CS 17 
 #define ETH_RST 4
 
 //MAC address
 byte mac[] = { 0x5E, 0x59, 0x10, 0x98, 0x23, 0x56 };
-
-
 
 // Wifi настройки
 const char* ssid = "levelmeter";
@@ -51,20 +49,14 @@ unsigned long lastLcdUpdateTime = 0;
 unsigned long lastWifiReconnect = 0;
 unsigned long lastLanReconnect = 0;
 
-// // Список ТОЛЬКО для чисел
-// // std::vector<float> numericalValues;
-// std::vector<int16_t> numericalValues;  // Целочисленные значения в int16_t для удобства записи в Modbus регистры
-
-// сервер
+// сервер на порту 502
 WebServer server(502);
 
 
 // дисплей
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 
-
 // Строка для передачи на Web
-
 String main_params = "0 0";
 
 // ========== ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ДЛЯ ETH v3.x ==========
@@ -548,7 +540,7 @@ void setup() {
 
   // Задаем конфигурацию watchdog
   esp_task_wdt_config_t twdt_config = {
-    .timeout_ms = 30000,   // 30 second timeout
+    .timeout_ms = 40000,   // 40 second timeout
     .idle_core_mask = 0,   // Monitor specific cores (0 for none)
     .trigger_panic = true  // System resets on timeout
   };
@@ -615,8 +607,10 @@ void loop() {
   updateLcdDisplay();
 
   // обработка запросов клиента
-  server.handleClient();
+  if (eth_connected) {
+    server.handleClient();
+  }
 
-  // "Кормление" watchdoga
+  // Feed watchdog
   esp_task_wdt_reset();
 }
