@@ -8,15 +8,11 @@
 #include <Wire.h>
 #include <esp_task_wdt.h>
 #include <esp_system.h>
-#include "esp_mac.h"
 
 
 // Рекомендуемые пины для ESP32 (избегаем конфликта с флеш-памятью -  Важно: НЕ использовать GPIO5!)
 #define ETH_CS 17
 #define ETH_RST 4
-
-//MAC address
-// byte mac[] = { 0x5E, 0x59, 0x10, 0x98, 0x23, 0x56 };
 
 // Wifi настройки
 const char* ssid = "levelmeter";
@@ -30,13 +26,15 @@ const unsigned long READ_INTERVAL = 5000;
 // интервал обновления дисплея
 const unsigned long LCD_UPDATE_INTERVAL = 1000;
 // сетевые переподключения
-const unsigned long WIFI_RECONNECT_DELAY = 1000;
-const unsigned long LAN_RECONNECT_DELAY = 1000;
+const unsigned long WIFI_RECONNECT_DELAY = 30000;
+const unsigned long LAN_RECONNECT_DELAY = 30000;
 
 
 // =================СТАТУСЫ СЕТИ==================================
-bool wifiConnected = false;
-bool lanConnected = false;
+static bool wifiConnected = false;
+static bool lanConnected = false;
+static bool eth_started = false;
+static bool cable_connected = false;
 
 
 // ===================СЧЕТЧИКИ====================================
@@ -46,7 +44,7 @@ unsigned long lastReadTime = 0;
 unsigned long lastLcdUpdateTime = 0;
 
 
-// переменные для фиксации времени переподключения сети
+// переменные для фиксации времени проверки/переподключения сети
 unsigned long lastWifiReconnect = 0;
 unsigned long lastLanReconnect = 0;
 
@@ -62,54 +60,57 @@ String main_params = "0 0";
 
 // ========== ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ДЛЯ ETH v3.x ==========
 
-SPIClass ethSPI(HSPI);              // Отдельный SPI для Ethernet W5500
-static bool eth_connected = false;  // Флаг состояния подключения
+SPIClass ethSPI(HSPI);  // Отдельный SPI для Ethernet W5500
 
 // ========== ОБРАБОТЧИК СОБЫТИЙ (ОБЯЗАТЕЛЬНО ДЛЯ v3.x) ==========
 
-void onEthEvent(arduino_event_id_t event) {
+// События Ethernet
+void onEthEvent(arduino_event_id_t event, arduino_event_info_t info) {
   switch (event) {
     case ARDUINO_EVENT_ETH_START:
       Serial.println("🔌 ETH Started");
-      ETH.setHostname("wendun_esp");
+      ETH.setHostname("wendum_esp");
+      eth_started = true;
       break;
     case ARDUINO_EVENT_ETH_CONNECTED:
       Serial.println("🔗 Cable connected");
+      cable_connected = true;
       break;
     case ARDUINO_EVENT_ETH_GOT_IP:
       Serial.print("🌐 IP: ");
       Serial.println(ETH.localIP());
-      eth_connected = true;  // ✅ Устанавливаем флаг
+      lanConnected = true;  // ✅ Устанавливаем флаг
       break;
     case ARDUINO_EVENT_ETH_LOST_IP:
+      Serial.println("ETH lost IP");
+      lanConnected = false;  // ✅ Сбрасываем флаг
+      break;
     case ARDUINO_EVENT_ETH_DISCONNECTED:
+      Serial.println("🔗 Cable disconnected!!");
+      cable_connected = false;
+      lanConnected = false;
+      break;
     case ARDUINO_EVENT_ETH_STOP:
-      Serial.println("🔌 ETH disconnected");
-      eth_connected = false;  // ✅ Сбрасываем флаг
+      Serial.println("🔌 ETH stopped");
+      lanConnected = false;  // ✅ Сбрасываем флаг
       break;
     default: break;
   }
 }
 
-// Низкоуровневая проверка W5500 через регистр версии
-bool checkW5500() {
-  uint8_t version;
-
-  digitalWrite(ETH_CS, LOW);
-  ethSPI.beginTransaction(SPISettings(14000000, MSBFIRST, SPI_MODE0));  // ✅ ethSPI вместо SPI
-
-  // Чтение регистра версии (адрес 0x0039, блок 0, операция чтения)
-  ethSPI.transfer(0x00);            // Байт 1: адрес старший
-  ethSPI.transfer(0x39);            // Байт 2: адрес младший + флаги
-  ethSPI.transfer(0x00);            // Байт 3: контрольный байт
-  version = ethSPI.transfer(0x00);  // Байт 4: данные
-
-  ethSPI.endTransaction();
-  digitalWrite(ETH_CS, HIGH);
-
-  return (version == 0x04);  // W5500 всегда возвращает 0x04
+// События WiFi
+void onWiFiEvent(arduino_event_id_t event, arduino_event_info_t info) {
+  switch (event) {
+    case ARDUINO_EVENT_WIFI_STA_GOT_IP:
+      wifiConnected = true;
+      break;
+    case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
+      wifiConnected = false;
+      break;
+    default:
+      break;
+  }
 }
-
 
 
 // ============ Обновление дисплея и сетевых подключений =========================
@@ -127,28 +128,16 @@ void startLAN() {
   pinMode(ETH_CS, OUTPUT);
   digitalWrite(ETH_CS, HIGH);
 
-  // Проверка модуля через регистр версии
-  Serial.print("Проверка регистра VERSIONR... ");
-  if (checkW5500()) {
-    Serial.println("✅ W5500 обнаружен (версия 0x04)");
-  } else {
-    Serial.println("❌ W5500 НЕ ОБНАРУЖЕН!");
-    while (1) {
-      Serial.println("ОШИБКА: модуль не отвечает");
-      delay(2000);
-    }
-  }
-
   // Получение IP-адреса
   Serial.println("\nПолучение IP по DHCP...");
   lcd.setCursor(0, 0);
   lcd.print("Get LAN IP DHCP ");
 
-  // ✅ Регистрация обработчика событий (ОБЯЗАТЕЛЬНО до ETH.begin!)
+  // ✅ Регистрация обработчика событий (ОБЯЗАТЕЛЬНО до ETH.begin)
   Network.onEvent(onEthEvent);
 
   // ✅ ПРАВИЛЬНЫЙ ВЫЗОВ ETH.begin() для W5500 в v3.x:
-  bool ethStarted = ETH.begin(
+  eth_started = ETH.begin(
     ETH_PHY_W5500,  // тип PHY
     1,              // адрес PHY (не критично для W5500)
     ETH_CS,         // CS = 17
@@ -158,190 +147,99 @@ void startLAN() {
     20              // частота SPI в МГц
   );
 
-  if (!ethStarted) {
-    Serial.println("❌ DHCP не удался");
-    lcd.setCursor(0, 0);
-    lcd.print("ETH init failed!");
-    return;
-  }
-
-  // Ожидание получения IP (DHCP)
-  unsigned long startWait = millis();
-  while (millis() - startWait < 30000 && ETH.localIP() == IPAddress(0, 0, 0, 0)) {
-    yield();
-    delay(100);
-  }
-
-  if (ETH.localIP() != IPAddress(0, 0, 0, 0)) {
-    Serial.print("✅ IP адрес: ");
-    Serial.println(ETH.localIP());
-    lcd.setCursor(0, 0);
-    lcd.clear();
-    lcd.print(ETH.localIP());
-
-    // Отображение MAC адреса
-    Serial.print("MAC Address: ");
-    Serial.println(ETH.macAddress());
-    lcd.setCursor(0, 1);
-    lcd.print(ETH.macAddress());
-
-    lanConnected = true;
-    lastLanReconnect = millis();
-  } else {
-    Serial.println("❌ DHCP timeout");
-    lcd.setCursor(0, 0);
-    lcd.print("LAN: DHCP fail  ");
+  if (!eth_started) {
     lanConnected = false;
   }
-  delay(1000);
 }
 
 void startWifi() {
   // Start Wi-Fi
   WiFi.mode(WIFI_STA);
+  WiFi.persistent(false);
+  WiFi.setAutoReconnect(true);
+  WiFi.onEvent(onWiFiEvent);
   WiFi.begin(ssid, password);
   Serial.print("Connecting to WiFi");
-
-  unsigned long startAttempt = millis();
-  const unsigned long timeout = 10000;  //  1 секунд на подключение
-
-  // Ждём подключения ИЛИ таймаута
-  while (WiFi.status() != WL_CONNECTED && millis() - startAttempt < timeout) {
-    yield();
-    lcd.setCursor(0, 0);
-    lcd.print("Connecting WiFi ");
-    Serial.print(".");
-    
-  }
-
-  // Обработка результата
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.println(" ✅");
-    Serial.println("WiFi connected");
-    lcd.setCursor(0, 0);
-    lcd.print("WiFi connected  ");
-    wifiConnected = true;  // 🔥 синхронизируем флаг!
-    lastWifiReconnect = millis();
-
-  } else {
-    Serial.println(" ❌ Timeout");
-    lcd.setCursor(0, 0);
-    lcd.print("WiFi timeout!  ");
-    wifiConnected = false;
-  }
-
-  return;
 }
 
 
 // регулярная проверка Wifi для loop
 void renewWifi() {
-  // проверяем счетчик
-  if (millis() - lastWifiReconnect < WIFI_RECONNECT_DELAY) return;
-
-  // Обновляем счетчик
-  lastWifiReconnect = millis();
-
-  // проверяем статус соединения
   if (WiFi.status() == WL_CONNECTED) {
-    if (!wifiConnected) {  // 🔥 только что подключились!
-      Serial.println("[WIFI] ✅ Подключено. IP: " + WiFi.localIP().toString());
-      lcd.setCursor(0, 0);
-      lcd.print("WiFi connected! ");
-      lcd.setCursor(0, 1);
-      lcd.print(WiFi.localIP().toString().substring(0, 16));
-    }
     wifiConnected = true;
     return;
   }
 
-  // Если не подключен — пытаемся подключиться
   wifiConnected = false;
 
-  Serial.println("[WIFI] Подключение к сети...");
+  if (millis() - lastWifiReconnect < WIFI_RECONNECT_DELAY) return;
+
+  lastWifiReconnect = millis();
+  Serial.println("WiFi reconnect..");
   lcd.setCursor(0, 0);
-  lcd.print("Connecting WiFi ");
-  lcd.setCursor(0, 1);
-  lcd.print("Please wait...");
-  WiFi.begin(ssid, password);
+  lcd.print("WiFi reconnect..");
+
+  WiFi.reconnect();
 }
 
 
 // Обновление статуса LAN, переподключение
 // Обновленная функция renewLAN() для v3.x
-
 void renewLAN() {
-  if (millis() - lastLanReconnect < LAN_RECONNECT_DELAY) return;
-  lastLanReconnect = millis();
 
-  // ✅ Быстрая проверка через флаг eth_connected
-  if (eth_connected && ETH.localIP() != IPAddress(0, 0, 0, 0)) {
+  // Быстрый чек
+  if (ETH.linkUp() && ETH.localIP() != IPAddress(0, 0, 0, 0)) {
     lanConnected = true;
     return;
   }
 
-  Serial.println("🔌 LAN: проверка подключения...");
+  // Чек не прошел, меняем флаг
   lanConnected = false;
 
-  Serial.println("🔄 LAN: перезапуск...");
-  lcd.setCursor(0, 0);
-  lcd.print("LAN reconnect...");
 
-  // ✅ ETH.end() вместо ETH.stop()
+  // Проверка таймера
+  if (millis() - lastLanReconnect < LAN_RECONNECT_DELAY) return;
+  lastLanReconnect = millis();
+
+  
+  // Обновляем дисплей
+  Serial.println("ETH restart...");
+  lcd.setCursor(0, 0);
+  lcd.print("Restart LAN...  ");
+
+  // Перезапуск LAN
   ETH.end();
   delay(100);
 
-
-  // Делаем reset W5500
   pinMode(ETH_RST, OUTPUT);
   digitalWrite(ETH_RST, LOW);
   delay(50);
   digitalWrite(ETH_RST, HIGH);
   delay(100);
 
-  bool result = ETH.begin(ETH_PHY_W5500, 1, ETH_CS, -1, ETH_RST, ethSPI, 20);
-
-  if (result) {
-    lcd.setCursor(0, 0);
-    lcd.print("ETH restart OK  ");
-
-    unsigned long startWait = millis();
-    while (millis() - startWait < 30000) {
-      yield();
-      // ✅ Проверка через флаг + IP
-      if (eth_connected && ETH.localIP() != IPAddress(0, 0, 0, 0)) {
-        lanConnected = true;
-        Serial.print("✅ LAN подключён: ");
-        Serial.println(ETH.localIP());
-        lcd.setCursor(0, 0);
-        lcd.print("LAN reconnected!");
-        return;
-      }
-      delay(50);
-    }
-  }
-
-  lanConnected = false;
-  Serial.println("❌ LAN: ошибка подключения");
-  lcd.setCursor(0, 0);
-  lcd.print("LAN Error!      ");
-  return;
+  eth_started = ETH.begin(ETH_PHY_W5500, 1, ETH_CS, -1, ETH_RST, ethSPI, 20);
 }
+
+
 
 // Обновление LCD дисплея для loop
 void updateLcdDisplay() {
   if (millis() - lastLcdUpdateTime < LCD_UPDATE_INTERVAL) return;
+
   lcd.setCursor(0, 0);
 
   // ✅ Правильная проверка: ETH.localIP() == IPAddress(0,0,0,0)
   if (ETH.localIP() == IPAddress(0, 0, 0, 0)) {
     lcd.print("NO LAN ADDR     ");
   } else {
-    lcd.clear();
+    lcd.print("                ");
+    lcd.setCursor(0, 0);
     lcd.print(ETH.localIP());
   }
 
   // Отображение результирующей строки
+  lcd.setCursor(0, 1);
+  lcd.print("                ");
   lcd.setCursor(0, 1);
   lcd.print(main_params);
 
@@ -609,7 +507,7 @@ void loop() {
   updateLcdDisplay();
 
   // обработка запросов клиента
-  if (eth_connected) {
+  if (lanConnected) {
     server.handleClient();
   }
 
