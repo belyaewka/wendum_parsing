@@ -144,7 +144,7 @@ void startLAN() {
     -1,             // INT не подключён
     ETH_RST,        // RST = 4
     ethSPI,         // объект SPIClass
-    20              // частота SPI в МГц
+    8              // частота SPI в МГц
   );
 
   if (!eth_started) {
@@ -217,7 +217,7 @@ void renewLAN() {
   digitalWrite(ETH_RST, HIGH);
   delay(100);
 
-  eth_started = ETH.begin(ETH_PHY_W5500, 1, ETH_CS, -1, ETH_RST, ethSPI, 20);
+  eth_started = ETH.begin(ETH_PHY_W5500, 1, ETH_CS, -1, ETH_RST, ethSPI, 8);
 }
 
 
