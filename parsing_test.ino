@@ -10,9 +10,22 @@
 #include <esp_system.h>
 
 
+
+// Распиновка Ethernet W5500 на Waveshare ESP32-S3-ETH
+// MISO = 12
+// MOSI = 11
+// SCLK = 13
+// CS = 14
+// RST = 9
+// INT = 10
+
+// I2C: SDA=21, SCL=17
+
+
+
 // Рекомендуемые пины для ESP32 (избегаем конфликта с флеш-памятью -  Важно: НЕ использовать GPIO5!)
-#define ETH_CS 17
-#define ETH_RST 4
+#define ETH_CS 14
+#define ETH_RST 9
 
 // Wifi настройки
 const char* ssid = "levelmeter";
@@ -123,8 +136,15 @@ void startLAN() {
   digitalWrite(ETH_RST, HIGH);
   delay(200);
 
-  // ✅ Инициализация ОТДЕЛЬНОГО SPI для Ethernet (ваши пины)
-  ethSPI.begin(18, 19, 23, ETH_CS);  // SCK=18, MISO=19, MOSI=23, CS=17
+  // ✅ Инициализация ОТДЕЛЬНОГО SPI для Ethernet
+  // Распиновка Ethernet W5500 на Waveshare ESP32-S3-ETH
+// MISO = 12
+// MOSI = 11
+// SCLK = 13
+// CS = 14
+// RST = 9
+// INT = 10
+  ethSPI.begin(13, 12, 11, ETH_CS);  // SCK=13, MISO=12, MOSI=11, CS=14
   pinMode(ETH_CS, OUTPUT);
   digitalWrite(ETH_CS, HIGH);
 
@@ -137,11 +157,12 @@ void startLAN() {
   Network.onEvent(onEthEvent);
 
   // ✅ ПРАВИЛЬНЫЙ ВЫЗОВ ETH.begin() для W5500 в v3.x:
+  
   eth_started = ETH.begin(
     ETH_PHY_W5500,  // тип PHY
     1,              // адрес PHY (не критично для W5500)
-    ETH_CS,         // CS = 17
-    -1,             // INT не подключён
+    ETH_CS,         // CS = 14
+    10,             // INT не подключён
     ETH_RST,        // RST = 4
     ethSPI,         // объект SPIClass
     8              // частота SPI в МГц
@@ -217,7 +238,7 @@ void renewLAN() {
   digitalWrite(ETH_RST, HIGH);
   delay(100);
 
-  eth_started = ETH.begin(ETH_PHY_W5500, 1, ETH_CS, -1, ETH_RST, ethSPI, 8);
+  eth_started = ETH.begin(ETH_PHY_W5500, 1, ETH_CS, 10, ETH_RST, ethSPI, 8);
 }
 
 
@@ -450,7 +471,7 @@ void setup() {
   esp_task_wdt_reset();
 
   // Инициализация дисплея
-  Wire.begin(21, 22);     // SDA, SCL (стандарт для ESP32)
+  Wire.begin(21, 17);     // SDA, SCL (стандарт для ESP32)
   Wire.setClock(400000);  // ускоряем шину ДО инициализации 400 кГц (Fast Mode). PCF8574 тянет стабильно
 
   lcd.init();
